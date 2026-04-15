@@ -1,0 +1,1574 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>泡よけ</title>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column; /* 追加: 子要素を縦に並べる */
+      justify-content: flex-start;
+      align-items: center; /* 水平方向の中央揃え */
+      height: 100vh;
+      width: 100vw;
+      margin: 0;
+      background: linear-gradient(135deg, #fff0f5, #ffe6eb, #fff5f7);
+      overflow: hidden; /* スクロール防止 */
+      position: relative; /* 子要素の絶対配置のため */
+    }
+    canvas {
+      background-color: transparent;
+      width: 100%;
+      height: calc(100% - 30px); /* 下部のリンク領域を確保 */
+      object-fit: contain; /* アスペクト比(400:600)を保ったまま画面に最大までフィットさせる */
+      object-position: top center; /* キャンバス内の描画を一番上に寄せる */
+      touch-action: none; /* スワイプ時のブラウザ挙動を防止 */
+    }
+    .author-link {
+      position: absolute;
+      bottom: 5px;
+      font-size: 12px;
+      color: #666;
+      text-decoration: none;
+      background-color: rgba(255, 255, 255, 0.7);
+      padding: 4px 12px;
+      border-radius: 12px;
+      z-index: 10;
+      pointer-events: auto;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="400" height="600"></canvas>
+  <a class="author-link" href="https://72no6495.web.fc2.com/" target="_blank">作者のサイトはこちら</a>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // LIFF Initialization
+    const liffId = "2009785185-qi9Lv7TO";
+    liff.init({ liffId: liffId }).then(() => {
+      console.log("LIFF Initialized");
+    }).catch((err) => {
+      console.error("LIFF Init Error", err);
+    });
+
+    function shareScoreOnLine() {
+      const modeText = isHardMode ? "ハードモード" : "ノーマルモード";
+      const shareText = `泡よけゲーム（${modeText}）で ${score} 点を獲得したよ！限界まで強化してボスに挑もう！\n遊んでみる👉 https://lin.ee/W0R1MRf`;
+      
+      if (liff.isLoggedIn() && liff.isApiAvailable('shareTargetPicker')) {
+        liff.shareTargetPicker([
+          {
+            type: "text",
+            text: shareText
+          }
+        ]).then(function (res) {
+          if (res) alert("LINEでシェアしました！");
+        }).catch(function (error) {
+          fallbackCopyTextToClipboard(shareText);
+        });
+      } else {
+        // LIFF環境外でのフォールバック（クリップボードコピー）
+        fallbackCopyTextToClipboard(shareText);
+      }
+    }
+
+    function fallbackCopyTextToClipboard(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text)
+                .then(() => alert('スコアとURLをコピーしました！LINE等に貼り付けてシェアできます！'))
+                .catch(() => execCommandCopy(text));
+        } else {
+            execCommandCopy(text);
+        }
+    }
+
+    function execCommandCopy(text) {
+        let textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed"; // スクロール防止
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try { 
+            let successful = document.execCommand('copy'); 
+            if(successful) alert('スコアとURLをコピーしました！LINE等に貼り付けてシェアできます！'); 
+            else alert('コピーに失敗しました。');
+        } catch (err) { 
+            alert('コピーに失敗しました。'); 
+        }
+        document.body.removeChild(textArea);
+    }
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function playSound(type) {
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
+
+      if (type === 'getGolden') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.exponentialRampToValueAtTime(1200, now + 0.1);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        osc.start(now);
+        osc.stop(now + 0.3);
+      } else if (type === 'hit') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
+        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      } else if (type === 'shoot') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(400, now);
+        osc.frequency.exponentialRampToValueAtTime(200, now + 0.1);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      } else if (type === 'powerup') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.setValueAtTime(554, now + 0.1);
+        osc.frequency.setValueAtTime(659, now + 0.2);
+        osc.frequency.setValueAtTime(880, now + 0.3);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.5);
+        osc.start(now);
+        osc.stop(now + 0.5);
+      } else if (type === 'bossHit') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(100, now);
+        osc.frequency.exponentialRampToValueAtTime(80, now + 0.1);
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      } else if (type === 'bossDefeat') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.linearRampToValueAtTime(800, now + 1.0);
+        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.linearRampToValueAtTime(0, now + 1.5);
+        osc.start(now);
+        osc.stop(now + 1.5);
+      } else if (type === 'bubbleBurst') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.exponentialRampToValueAtTime(400, now + 0.1);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      }
+    }
+
+    const characterImg = new Image();
+    characterImg.src = 'profile.jpg';
+
+    let character = {
+      x: canvas.width / 2,
+      y: canvas.height / 2,
+      radius: 20,
+      targetX: canvas.width / 2,
+      targetY: canvas.height / 2
+    };
+
+    let bubbles = [];
+    let bullets = [];
+    let bubbleSpawnRate = 100;
+    let frameCount = 0;
+    let score = 0;
+    let gameState = 'start';
+    let countdown = 3;
+    let countdownTimer = null;
+    let isTouching = false;
+    let gameOverState = false;
+    let shopCount = 0;
+    let isShopOpen = false;
+    let shopOptions = [];
+    let goldenBubbleScoreBonus = 0;
+    let autoShootInterval = null;
+    let lastShopScore = -2000;
+    let shieldMessageTimer = 0; // シールド消費メッセージの表示時間
+    let boss = null;
+    let bossActive = false;
+    let pendingBoss = 0;
+    let cheatGoldenScore = false;
+    let cheatMachineGun = false;
+    let cheatMaxWeapons = false;
+    let cheatShootInterval = null;
+    let bossWarningTimer = 0;
+    let boss1Defeated = false;
+    let boss2Defeated = false;
+    let bossBullets = [];
+    let autoShieldTimer = null;
+    let cheatInvincible = false;
+    let cheatHardMode = false;
+    let survivalMode = false;
+    let blackBubbles = [];
+    let survivalTimer = 0;
+    let survivalMessageTimer = 0;
+    let isHardMode = false;
+    let bgmNodes = [];
+    let ambientBgmInterval = null;
+
+    function playRandomChord() {
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      
+      // Relaxing ambient chords (Cmaj7, Gmaj7, Em7, Am7, D11)
+      const chords = [
+        [261.63, 329.63, 392.00, 493.88], // Cmaj7
+        [196.00, 246.94, 293.66, 369.99], // Gmaj7
+        [164.81, 196.00, 246.94, 293.66], // Em7
+        [220.00, 261.63, 329.63, 392.00], // Am7
+        [146.83, 196.00, 261.63, 329.63]  // D11-ish
+      ];
+      
+      const freqs = chords[Math.floor(Math.random() * chords.length)];
+      const now = audioCtx.currentTime;
+      
+      freqs.forEach(f => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        const filter = audioCtx.createBiquadFilter();
+        
+        osc.type = 'sine';
+        osc.frequency.value = f;
+        
+        filter.type = 'lowpass';
+        filter.frequency.value = 500;
+        
+        // 1.5s Attack, 1.5s Sustain, 2s Release (Total 5s)
+        // Since interval is 3s, the chords will nicely overlap and crossfade
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.06, now + 1.5);
+        gain.gain.setValueAtTime(0.06, now + 3.0);
+        gain.gain.linearRampToValueAtTime(0, now + 5.0);
+        
+        osc.detune.value = (Math.random() - 0.5) * 10;
+        
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(audioCtx.destination);
+        
+        osc.start(now);
+        osc.stop(now + 5.0);
+        bgmNodes.push({osc, gain});
+      });
+
+      // Keep array size manageable
+      if (bgmNodes.length > 30) {
+        bgmNodes = bgmNodes.slice(-20);
+      }
+    }
+
+    function startAmbientBGM() {
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      stopAmbientBGM();
+      playRandomChord();
+      ambientBgmInterval = setInterval(playRandomChord, 3000);
+    }
+    
+    function stopAmbientBGM() {
+      if (ambientBgmInterval) {
+        clearInterval(ambientBgmInterval);
+        ambientBgmInterval = null;
+      }
+      const now = audioCtx.currentTime;
+      bgmNodes.forEach(node => {
+        try {
+          node.gain.gain.cancelScheduledValues(now);
+          node.gain.gain.linearRampToValueAtTime(0, now + 1.0);
+          node.osc.stop(now + 1.0);
+        } catch(e) {}
+      });
+      bgmNodes = [];
+    }
+    let shopEffects = {
+      smallerBubbles: false,
+      largerGoldenBubbles: false,
+      slowerBubbles: false,
+      bulletSpeedUp: false,
+      speedUp: false,
+      goldenBubbleChanceUp: false,
+      scorePerSecond: false,
+      fasterShooting: false,
+      smallerHitbox: false,
+      piercingBullets: false,
+      shield: false,
+      straightBubbles: false,
+      extraSpeedUp: false,
+      extraScorePerSecond: false,
+      extraGoldenBubbleChanceUp: false,
+      multiShot: 1,
+      giantBullets: 0,
+      autoShield: false,
+      fiveWay: false,
+      eightWay: false,
+      homingBullets: false,
+      goldenMagnet: 0,
+      bossDamage: 1,
+      shieldRetaliation: false,
+      scoreMultiplier: 1
+    };
+
+    let floatingTexts = [];
+    let particles = [];
+
+    function addFloatingText(text, x, y, color) {
+      floatingTexts.push({ text, x, y, color, life: 60 });
+    }
+
+    function addParticles(x, y, color, count) {
+      for (let i = 0; i < count; i++) {
+        particles.push({
+          x: x,
+          y: y,
+          vx: (Math.random() - 0.5) * 6,
+          vy: (Math.random() - 0.5) * 6,
+          life: 30,
+          color: color,
+          radius: Math.random() * 4 + 2
+        });
+      }
+    }
+
+    function updateVisualEffects() {
+      // 浮遊テキストの更新
+      for (let i = floatingTexts.length - 1; i >= 0; i--) {
+        floatingTexts[i].y -= 1;
+        floatingTexts[i].life -= 1;
+        if (floatingTexts[i].life <= 0) {
+          floatingTexts.splice(i, 1);
+        }
+      }
+      
+      // パーティクルの更新
+      for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].x += particles[i].vx;
+        particles[i].y += particles[i].vy;
+        particles[i].life -= 1;
+        particles[i].radius *= 0.9;
+        if (particles[i].life <= 0) {
+          particles.splice(i, 1);
+        }
+      }
+    }
+
+    function drawVisualEffects() {
+      // パーティクルの描画
+      particles.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.life / 30;
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+      });
+
+      // 浮遊テキストの描画
+      ctx.font = 'bold 24px Arial';
+      floatingTexts.forEach(ft => {
+        ctx.fillStyle = ft.color;
+        ctx.globalAlpha = ft.life / 60;
+        ctx.fillText(ft.text, ft.x - 20, ft.y);
+        ctx.globalAlpha = 1.0;
+      });
+    }
+
+    function getTouchPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      // object-fit: contain による実際の描画スケールを計算
+      const scale = Math.min(rect.width / canvas.width, rect.height / canvas.height);
+      
+      // 描画領域の実際のサイズ
+      const drawnWidth = canvas.width * scale;
+      const drawnHeight = canvas.height * scale;
+      
+      // コンテナ内の描画領域のオフセット（上寄せ、水平中央配置）
+      const offsetX = (rect.width - drawnWidth) / 2;
+      const offsetY = 0; // object-position: top に合わせたためYのズレは0
+      
+      let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      let clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+      // 実際のキャンバス内座標に変換
+      return {
+        x: (clientX - rect.left - offsetX) / scale,
+        y: (clientY - rect.top - offsetY) / scale
+      };
+    }
+
+    function handleStart(e) {
+      if (e.cancelable) e.preventDefault();
+      const pos = getTouchPos(e);
+      let touchX = pos.x;
+      let touchY = pos.y;
+
+      if (gameOverState) {
+        // Share button clicked
+        if (touchX > canvas.width / 2 - 100 && touchX < canvas.width / 2 + 100 &&
+            touchY > canvas.height / 2 + 30 && touchY < canvas.height / 2 + 80) {
+          shareScoreOnLine();
+        } 
+        // Restart button clicked
+        else if (touchX > canvas.width / 2 - 100 && touchX < canvas.width / 2 + 100 &&
+                 touchY > canvas.height / 2 + 90 && touchY < canvas.height / 2 + 140) {
+          location.reload();
+        }
+        return;
+      }
+
+      if (isShopOpen) {
+        if (touchX > canvas.width / 2 - 100 && touchX < canvas.width / 2 - 20 &&
+            touchY > canvas.height / 2 + 20 && touchY < canvas.height / 2 + 60) {
+          applyShopEffect(1);
+          closeShop();
+        } else if (touchX > canvas.width / 2 + 20 && touchX < canvas.width / 2 + 100 &&
+                   touchY > canvas.height / 2 + 20 && touchY < canvas.height / 2 + 60) {
+          applyShopEffect(2);
+          closeShop();
+        }
+      } else if (gameState === 'start') {
+        // Normal Start Button
+        if (touchX > canvas.width / 2 - 80 && touchX < canvas.width / 2 + 80 &&
+            touchY > canvas.height / 2 - 50 && touchY < canvas.height / 2 - 5) {
+          isHardMode = false;
+          gameState = 'countdown';
+          startCountdown();
+          startAmbientBGM();
+        } 
+        // Hard Start Button
+        else if (touchX > canvas.width / 2 - 80 && touchX < canvas.width / 2 + 80 &&
+                  touchY > canvas.height / 2 + 10 && touchY < canvas.height / 2 + 55) {
+          isHardMode = true;
+          gameState = 'countdown';
+          startCountdown();
+          startAmbientBGM();
+        }
+        // How to Play
+        else if (touchX > canvas.width / 2 - 80 && touchX < canvas.width / 2 + 80 &&
+                  touchY > canvas.height / 2 + 70 && touchY < canvas.height / 2 + 115) {
+          gameState = 'howToPlay';
+        }
+      } else if (gameState === 'howToPlay') {
+        // Handle secret cheat button (pink circle in top right)
+        let cx = canvas.width - 30;
+        let cy = 30;
+        if (Math.sqrt((touchX - cx)**2 + (touchY - cy)**2) < 20) {
+          let pin = prompt('4桁の暗証番号を入力してください');
+          if (pin === '4545') {
+            gameState = 'cheatMenu';
+          } else if (pin !== null) {
+            alert('暗証番号が違います');
+          }
+          return;
+        }
+        
+        if (touchX > canvas.width / 2 - 50 && touchX < canvas.width / 2 + 50 &&
+            touchY > canvas.height / 2 + 100 && touchY < canvas.height / 2 + 150) {
+          gameState = 'start';
+        }
+      } else if (gameState === 'cheatMenu') {
+        let btnX = canvas.width / 2 - 120;
+        let btnW = 240;
+        let btnH = 40;
+        let startY = 80;
+        let gap = 50;
+
+        for(let i=0; i<8; i++) {
+          let y = startY + i * gap;
+          if(touchX > btnX && touchX < btnX + btnW && touchY > y && touchY < y + btnH) {
+            if(i === 0) { cheatGoldenScore = !cheatGoldenScore; }
+            else if(i === 1) { 
+              cheatMachineGun = !cheatMachineGun; 
+              if (cheatMachineGun) {
+                if (cheatShootInterval) clearInterval(cheatShootInterval);
+                cheatShootInterval = setInterval(shootBullet, 50);
+              } else {
+                if (cheatShootInterval) clearInterval(cheatShootInterval);
+                cheatShootInterval = null;
+              }
+            }
+            else if(i === 2) { cheatMaxWeapons = !cheatMaxWeapons; }
+            else if(i === 3) { cheatInvincible = !cheatInvincible; }
+            else if(i === 4) { cheatHardMode = !cheatHardMode; isHardMode = cheatHardMode; }
+            else if(i === 5) { score = 26500; lastShopScore = score; shopCount = 10; boss1Defeated = false; }
+            else if(i === 6) { score = 59500; lastShopScore = score; shopCount = 20; boss1Defeated = true; }
+            else if(i === 7) { gameState = 'countdown'; startCountdown(); startAmbientBGM(); }
+          }
+        }
+      } else if (gameState === 'playing' && !isShopOpen) {
+        isTouching = true;
+        updateTargetPosition(e);
+      }
+    }
+
+    function handleMove(e) {
+      if (e.cancelable) e.preventDefault();
+      if (gameOverState) return;
+      if (gameState === 'playing' && !isShopOpen) {
+        updateTargetPosition(e);
+      }
+    }
+
+    function handleEnd(e) {
+      if (gameState === 'playing') {
+        isTouching = false;
+      }
+    }
+
+    // タッチイベントの登録
+    canvas.addEventListener('touchstart', handleStart, {passive: false});
+    canvas.addEventListener('touchmove', handleMove, {passive: false});
+    canvas.addEventListener('touchend', handleEnd);
+    
+    // マウスイベントの登録（PCブラウザ等でもクリックで反応するように）
+    canvas.addEventListener('mousedown', handleStart);
+    canvas.addEventListener('mousemove', (e) => {
+      if (isTouching) handleMove(e);
+    });
+    window.addEventListener('mouseup', handleEnd);
+
+    function closeShop() {
+      isShopOpen = false;
+      bubbles = []; // 強化時に画面内の泡をリセット
+      bullets = [];
+      character.targetX = character.x; // タップした位置に移動するのを防ぐ
+      character.targetY = character.y;
+    }
+
+    function updateTargetPosition(e) {
+      const pos = getTouchPos(e);
+      const offsetX = 50;
+      const offsetY = 50;
+      let newX = pos.x - offsetX;
+      let newY = pos.y - offsetY;
+      character.targetX = Math.max(character.radius, Math.min(canvas.width - character.radius, newX));
+      character.targetY = Math.max(character.radius, Math.min(canvas.height - character.radius, newY));
+    }
+
+    function moveCharacter() {
+      let speed = 5;
+      if (shopEffects.speedUp) speed = 7;
+      if (shopEffects.extraSpeedUp) speed = 9;
+      let dx = character.targetX - character.x;
+      let dy = character.targetY - character.y;
+      let distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance > speed) {
+        character.x += (dx / distance) * speed;
+        character.y += (dy / distance) * speed;
+      } else {
+        character.x = character.targetX;
+        character.y = character.targetY;
+      }
+    }
+
+    function startCountdown() {
+      countdownTimer = setInterval(() => {
+        countdown--;
+        if (countdown <= 0) {
+          clearInterval(countdownTimer);
+          gameState = 'playing';
+          startScoreTimer();
+          // ハードモードの場合は最初から黒い泡を1つ出現させる
+          if (isHardMode) {
+            blackBubbles.push({
+              x: Math.random() < 0.5 ? -40 : canvas.width + 40,
+              y: Math.random() * canvas.height,
+              radius: 25,
+              speed: 0.3
+            });
+          }
+        }
+      }, 1000);
+    }
+
+    let scoreTimer = null;
+    function startScoreTimer() {
+      if (scoreTimer) clearInterval(scoreTimer);
+      scoreTimer = setInterval(() => {
+        if (gameState === 'playing' && !gameOverState) {
+          if (shopEffects.extraScorePerSecond) score += 30;
+          else if (shopEffects.scorePerSecond) score += 20;
+          else score += 10;
+        }
+      }, 1000);
+    }
+
+    function spawnBubble() {
+      let goldenBubbleChance = 0.125;
+      if (shopEffects.goldenBubbleChanceUp) goldenBubbleChance = 0.2;
+      if (shopEffects.extraGoldenBubbleChanceUp) goldenBubbleChance = 0.3;
+      const baseRadius = 15;
+      const bubbleRadius = shopEffects.smallerBubbles ? Math.max(5, baseRadius - 5) : baseRadius;
+      const goldenBubbleRadius = shopEffects.largerGoldenBubbles ? baseRadius + 5 : baseRadius;
+      const bubbleSpeedY = shopEffects.slowerBubbles ? 0.2 : 0.3;
+
+      if (Math.random() < goldenBubbleChance) {
+        bubbles.push({
+          x: Math.random() * canvas.width,
+          y: -20,
+          radius: goldenBubbleRadius,
+          speedX: Math.random() * 0.5 - 0.25,
+          speedY: bubbleSpeedY,
+          isGoldenBubble: true
+        });
+      } else {
+        bubbles.push({
+          x: Math.random() * canvas.width,
+          y: -20,
+          radius: bubbleRadius,
+          speedX: Math.random() * 0.5 - 0.25,
+          speedY: bubbleSpeedY,
+          isGoldenBubble: false
+        });
+      }
+    }
+
+    function updateBubbles() {
+      for (let i = bubbles.length - 1; i >= 0; i--) {
+        let b = bubbles[i];
+        let gMagnet = cheatMaxWeapons ? 2 : shopEffects.goldenMagnet;
+        if (b.isGoldenBubble && gMagnet > 0) {
+          let dx = character.x - b.x;
+          let dy = character.y - b.y;
+          let dist = Math.sqrt(dx*dx + dy*dy);
+          let magnetRange = gMagnet === 1 ? 150 : 300;
+          if (dist < magnetRange) {
+            b.x += (dx / dist) * 4;
+            b.y += (dy / dist) * 4;
+          } else {
+            if (shopEffects.straightBubbles) b.x += b.speedX;
+            else b.x += b.speedX + Math.sin(Date.now() * 0.001) * 1;
+            b.y += b.speedY;
+          }
+        } else {
+          if (shopEffects.straightBubbles) b.x += b.speedX;
+          else b.x += b.speedX + Math.sin(Date.now() * 0.001) * 1;
+          b.y += b.speedY;
+        }
+        if (b.y > canvas.height + b.radius) bubbles.splice(i, 1);
+      }
+    }
+
+    function checkCollisions() {
+      if (gameOverState) return;
+
+      if (survivalMode || isHardMode) {
+        blackBubbles.forEach(bb => {
+          let dx = character.x - bb.x;
+          let dy = character.y - bb.y;
+          let dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < character.radius + bb.radius) {
+            if (cheatInvincible) {
+              // Ignore collision
+            } else if (shopEffects.shield) {
+              shopEffects.shield = false;
+              bb.x -= (dx/dist) * 50;
+              bb.y -= (dy/dist) * 50;
+              shieldMessageTimer = 120;
+              if (shopEffects.shieldRetaliation) triggerRetaliation();
+            } else {
+              gameOver();
+            }
+          }
+        });
+      }
+
+      if (bossActive && boss && (boss.type === 3 || boss.y >= boss.targetY - 50)) {
+        let dx = character.x - boss.x;
+        let dy = character.y - boss.y;
+        if (Math.sqrt(dx*dx + dy*dy) < character.radius + boss.radius) {
+          if (cheatInvincible) {
+            // Ignore collision
+          } else if (shopEffects.shield) {
+            shopEffects.shield = false;
+            boss.y -= 50; // Push boss back
+            if(boss.type === 3) { boss.x -= dx; boss.y -= dy; } // Push back from any direction
+            shieldMessageTimer = 120;
+          } else {
+            gameOver();
+          }
+        }
+      }
+
+      for (let i = bossBullets.length - 1; i >= 0; i--) {
+        let bb = bossBullets[i];
+        let dx = character.x - bb.x;
+        let dy = character.y - bb.y;
+        if (Math.sqrt(dx*dx + dy*dy) < character.radius + bb.radius) {
+          if (bb.isGolden) {
+            playSound('getGolden');
+            let baseGoldScore = cheatGoldenScore ? 2000 : 200;
+            let addedScore = baseGoldScore + goldenBubbleScoreBonus;
+            score += addedScore;
+            addFloatingText('+' + addedScore, bb.x, bb.y, 'gold');
+            addParticles(bb.x, bb.y, 'gold', 15);
+            bossBullets.splice(i, 1);
+            fireBullets();
+          } else {
+            if (cheatInvincible) {
+              // Ignore
+            } else if (shopEffects.shield) {
+              shopEffects.shield = false;
+              bossBullets.splice(i, 1);
+              shieldMessageTimer = 120;
+              if (shopEffects.shieldRetaliation) triggerRetaliation();
+            } else {
+              gameOver();
+            }
+          }
+        }
+      }
+
+      bubbles.forEach((b, index) => {
+        let dx = character.x - b.x;
+        let dy = character.y - b.y;
+        let distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < character.radius + b.radius) {
+          if (b.isGoldenBubble) {
+            playSound('getGolden');
+            let baseGoldScore = cheatGoldenScore ? 2000 : 200;
+            let addedScore = baseGoldScore + goldenBubbleScoreBonus;
+            score += addedScore;
+            addFloatingText('+' + addedScore, b.x, b.y, 'gold');
+            addParticles(b.x, b.y, 'gold', 15);
+            bubbles.splice(index, 1);
+            fireBullets();
+          } else {
+            if (cheatInvincible) {
+              // Ignore
+            } else if (shopEffects.shield) {
+              shopEffects.shield = false;
+              bubbles = []; // すべての泡を削除
+              shieldMessageTimer = 120; // メッセージを約2秒表示（60fpsとして）
+              if (shopEffects.shieldRetaliation) triggerRetaliation();
+            } else {
+              gameOver();
+            }
+          }
+        }
+      });
+    }
+
+    function triggerRetaliation() {
+      for (let i = 0; i < 36; i++) {
+        let angle = i * 10 * Math.PI / 180;
+        bullets.push({
+          x: character.x,
+          y: character.y,
+          speedX: Math.cos(angle) * 5,
+          speedY: Math.sin(angle) * 5,
+          radius: 8
+        });
+      }
+      playSound('shoot');
+    }
+
+    function updateBoss() {
+      if (score >= 27000 && !boss1Defeated && !bossActive && pendingBoss !== 1) {
+        pendingBoss = 1;
+        bossWarningTimer = 180; // 3 seconds at 60fps
+      } else if (boss1Defeated && shopCount >= 20 && score >= lastShopScore + 8000 && !boss2Defeated && !bossActive && pendingBoss !== 2) {
+        pendingBoss = 2;
+        bossWarningTimer = 180;
+      }
+
+      if (bossWarningTimer > 0) {
+        bossWarningTimer--;
+        if (bossWarningTimer === 0) {
+          bossActive = true;
+          if (pendingBoss === 1) {
+            boss = { type: 1, x: canvas.width / 2, y: -100, targetY: 100, hp: 150, maxHp: 150, radius: 60, color: 'purple', vx: 2 };
+          } else if (pendingBoss === 2) {
+            if (isHardMode) {
+              let startX = canvas.width / 2;
+              let startY = -100;
+              if (blackBubbles.length > 0) {
+                startX = blackBubbles[0].x;
+                startY = blackBubbles[0].y;
+              }
+              blackBubbles = []; // 吸収される
+              boss = { type: 3, x: startX, y: startY, targetY: -9999, hp: 8000, maxHp: 8000, radius: 25, color: 'black', speed: 0.8, angle: 0 };
+            } else {
+              boss = { type: 2, x: canvas.width / 2, y: -100, targetY: 120, hp: 8000, maxHp: 8000, radius: 80, color: 'red', vx: 1.5, angle: 0 };
+            }
+          }
+        }
+      }
+
+      if (bossActive && boss) {
+        if (boss.y < boss.targetY && boss.type !== 3) {
+          boss.y += 1;
+        } else {
+          if (boss.type === 3) {
+            let dx = character.x - boss.x;
+            let dy = character.y - boss.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 0) {
+              boss.x += (dx / dist) * boss.speed;
+              boss.y += (dy / dist) * boss.speed;
+            }
+            boss.angle += 3; // 回転速度もゆっくりに
+            
+            // 自機狙い弾: さらに間隔を長く、スピードも遅く
+            if (frameCount % 150 === 0) {
+              let isGolden = Math.random() < 0.1;
+              bossBullets.push({ x: boss.x, y: boss.y, speedX: (dx / dist) * 1.2, speedY: (dy / dist) * 1.2, radius: 10, color: isGolden ? 'gold' : 'black', isGolden: isGolden });
+            }
+            // ばら撒き弾: 発射をさらに控えめに、弾速もかなりゆっくり
+            if (frameCount % 360 === 0) {
+              for(let i = 0; i < 5; i++) {
+                let rad = (i * 360 / 5 + boss.angle) * Math.PI / 180;
+                let isGolden = Math.random() < 0.05;
+                bossBullets.push({ x: boss.x, y: boss.y, speedX: Math.cos(rad) * 0.8, speedY: Math.sin(rad) * 0.8, radius: 8, color: isGolden ? 'gold' : 'purple', isGolden: isGolden });
+              }
+            }
+          } else {
+            boss.x += boss.vx;
+            if (boss.x < boss.radius || boss.x > canvas.width - boss.radius) boss.vx *= -1;
+  
+            if (boss.type === 1 && frameCount % 120 === 0) {
+              let dx = character.x - boss.x;
+              let dy = character.y - boss.y;
+              let dist = Math.sqrt(dx * dx + dy * dy);
+              let isGolden = Math.random() < 0.2;
+              bossBullets.push({ x: boss.x, y: boss.y + boss.radius, speedX: (dx / dist) * 1.5, speedY: (dy / dist) * 1.5, radius: 15, color: isGolden ? 'gold' : 'lightblue', isGolden: isGolden });
+            } else if (boss.type === 2) {
+              boss.angle += 11; // 弾幕用の回転角度
+              
+              // 渦巻き弾幕（Spiral）
+              if (frameCount % 20 === 0) {
+                let rad1 = boss.angle * Math.PI / 180;
+                let isGolden1 = Math.random() < 0.05;
+                bossBullets.push({ x: boss.x, y: boss.y + boss.radius / 2, speedX: Math.cos(rad1) * 0.5, speedY: Math.sin(rad1) * 0.5, radius: 10, color: isGolden1 ? 'gold' : 'red', isGolden: isGolden1 });
+                
+                let rad2 = (boss.angle + 180) * Math.PI / 180;
+                let isGolden2 = Math.random() < 0.05;
+                bossBullets.push({ x: boss.x, y: boss.y + boss.radius / 2, speedX: Math.cos(rad2) * 0.5, speedY: Math.sin(rad2) * 0.5, radius: 10, color: isGolden2 ? 'gold' : 'red', isGolden: isGolden2 });
+              }
+              
+              // 全方位弾幕（Circle Burst）
+              if (frameCount % 150 === 0) {
+                for(let i = 0; i < 12; i++) {
+                  let rad = (i * 360 / 12) * Math.PI / 180;
+                  let isGolden = Math.random() < 0.1;
+                  bossBullets.push({ x: boss.x, y: boss.y + boss.radius / 2, speedX: Math.cos(rad) * 0.4, speedY: Math.sin(rad) * 0.4, radius: 10, color: isGolden ? 'gold' : '#ff4444', isGolden: isGolden });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    function updateBossBullets() {
+      for (let i = bossBullets.length - 1; i >= 0; i--) {
+        let b = bossBullets[i];
+        b.x += b.speedX;
+        b.y += b.speedY;
+        if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) bossBullets.splice(i, 1);
+      }
+    }
+
+    function drawBoss() {
+      if (bossActive && boss) {
+        ctx.beginPath();
+        ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
+        ctx.fillStyle = boss.color;
+        ctx.fill();
+        if (boss.type === 3) {
+          ctx.strokeStyle = 'red';
+          ctx.lineWidth = 4;
+          ctx.stroke();
+        }
+
+        let barW = Math.max(60, boss.radius * 2);
+        ctx.fillStyle = 'black';
+        ctx.fillRect(boss.x - barW / 2, boss.y - boss.radius - 20, barW, 10);
+        ctx.fillStyle = 'red';
+        ctx.fillRect(boss.x - barW / 2, boss.y - boss.radius - 20, barW * (boss.hp / boss.maxHp), 10);
+      }
+    }
+
+    function drawBossBullets() {
+      bossBullets.forEach(b => {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+        ctx.fillStyle = b.color;
+        ctx.fill();
+      });
+    }
+
+    function defeatBoss() {
+      playSound('bossDefeat');
+      addFloatingText('BOSS DEFEATED!', boss.x, boss.y, 'gold');
+      
+      let bonus = boss.type === 1 ? 5000 : 10000;
+      score += bonus * shopEffects.scoreMultiplier;
+
+      if (boss.type === 1) {
+        boss1Defeated = true;
+        lastShopScore = score; // Reset shop progress for 11-20
+      } else {
+        boss2Defeated = true;
+        survivalMode = true;
+        survivalMessageTimer = 180;
+        survivalTimer = 0;
+        blackBubbles = [];
+      }
+
+      for (let i = 0; i < 30; i++) {
+        bubbles.push({
+          x: boss.x + (Math.random() - 0.5) * 100,
+          y: boss.y + (Math.random() - 0.5) * 100,
+          radius: 20,
+          speedX: (Math.random() - 0.5) * 4,
+          speedY: Math.random() * 2 - 5,
+          isGoldenBubble: true
+        });
+      }
+
+      bossActive = false;
+      boss = null;
+      bossBullets = [];
+      pendingBoss = 0;
+    }
+
+    function findClosestBubble() {
+      let closestBubble = null;
+      let minDistance = Infinity;
+
+      bubbles.forEach(b => {
+        if (!b.isGoldenBubble) {
+          let dx = character.x - b.x;
+          let dy = character.y - b.y;
+          let distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestBubble = b;
+          }
+        }
+      });
+
+      return closestBubble;
+    }
+
+    function shootBullet() {
+      let targetX = character.x;
+      let targetY = character.y - 1; // Default target up
+      let dx = 0; let dy = -1;
+      let distance = 1;
+
+      if (bossActive && boss) {
+        targetX = boss.x;
+        targetY = boss.y;
+        dx = targetX - character.x;
+        dy = targetY - character.y;
+        distance = Math.sqrt(dx * dx + dy * dy);
+      } else {
+        const closestBubble = findClosestBubble();
+        if (closestBubble) {
+          targetX = closestBubble.x;
+          targetY = closestBubble.y;
+          dx = targetX - character.x;
+          dy = targetY - character.y;
+          distance = Math.sqrt(dx * dx + dy * dy);
+        }
+      }
+
+      let speed = 5;
+      let baseVx = (dx / distance) * speed;
+      let baseVy = (dy / distance) * speed;
+      let r = shopEffects.giantBullets === 2 ? 18 : (shopEffects.giantBullets === 1 ? 12 : 6);
+
+      let angles = [0];
+      if (shopEffects.eightWay || cheatMaxWeapons) angles = [0, 45, 90, 135, 180, 225, 270, 315];
+      else if (shopEffects.fiveWay) angles = [0, -30, 30, -60, 60];
+      else if (shopEffects.multiShot === 3) angles = [0, -20, 20];
+
+      angles.forEach(angle => {
+        let rad = angle * Math.PI / 180;
+        let cosA = Math.cos(rad);
+        let sinA = Math.sin(rad);
+        let vx = baseVx * cosA - baseVy * sinA;
+        let vy = baseVx * sinA + baseVy * cosA;
+        bullets.push({
+          x: character.x,
+          y: character.y,
+          speedX: vx,
+          speedY: vy,
+          radius: r
+        });
+      });
+
+      playSound('shoot');
+      addParticles(character.x, character.y, 'lime', 5);
+    }
+
+    function fireBullets() {
+      let shots = 0;
+      const intervalTime = (shopEffects.fasterShooting || cheatMaxWeapons) ? 150 : 300;
+      const interval = setInterval(() => {
+        if (shots < 8) {
+          shootBullet();
+          shots++;
+        } else {
+          clearInterval(interval);
+        }
+      }, intervalTime);
+    }
+
+    function updateBullets() {
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        let bullet = bullets[i];
+        
+        let isHoming = shopEffects.homingBullets || cheatMaxWeapons;
+        let isSpeedUp = shopEffects.bulletSpeedUp || cheatMaxWeapons;
+        let isPiercing = shopEffects.piercingBullets || cheatMaxWeapons;
+        
+        if (isHoming) {
+          let target = null;
+          if (bossActive && boss) target = boss;
+          else target = findClosestBubble();
+          
+          if (target) {
+            let dx = target.x - bullet.x;
+            let dy = target.y - bullet.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist > 0) {
+              bullet.speedX += (dx/dist) * 0.4;
+              bullet.speedY += (dy/dist) * 0.4;
+              let currentSpeed = Math.sqrt(bullet.speedX*bullet.speedX + bullet.speedY*bullet.speedY);
+              let maxSpeed = 5 * (isSpeedUp ? 1.5 : 1);
+              bullet.speedX = (bullet.speedX / currentSpeed) * maxSpeed;
+              bullet.speedY = (bullet.speedY / currentSpeed) * maxSpeed;
+            }
+          }
+        }
+
+        bullet.x += bullet.speedX * (isHoming ? 1 : (isSpeedUp ? 1.5 : 1));
+        bullet.y += bullet.speedY * (isHoming ? 1 : (isSpeedUp ? 1.5 : 1));
+        if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+          bullets.splice(i, 1);
+        } else {
+          let hitBlack = false;
+          if (survivalMode) {
+            for (let b = 0; b < blackBubbles.length; b++) {
+              let bb = blackBubbles[b];
+              let dx = bullet.x - bb.x;
+              let dy = bullet.y - bb.y;
+              if (Math.sqrt(dx*dx + dy*dy) < bullet.radius + bb.radius) {
+                addParticles(bullet.x, bullet.y, 'gray', 3);
+                hitBlack = true;
+                break;
+              }
+            }
+          }
+          if (hitBlack) {
+            bullets.splice(i, 1);
+            continue; // Bullet disappears, black bubble takes no damage
+          }
+
+          let hitBoss = false;
+
+          // Check boss collision
+          if (bossActive && boss && (boss.type === 3 || boss.y >= boss.targetY - 50)) {
+            let dx = bullet.x - boss.x;
+            let dy = bullet.y - boss.y;
+            if (Math.sqrt(dx*dx + dy*dy) < bullet.radius + boss.radius) {
+              boss.hp -= cheatMaxWeapons ? 4 : shopEffects.bossDamage;
+              playSound('bossHit');
+              addParticles(bullet.x, bullet.y, 'white', 5);
+              hitBoss = true;
+              if (boss.hp <= 0) defeatBoss();
+            }
+          }
+
+          if (hitBoss) {
+            bullets.splice(i, 1); // Boss blocks piercing bullets
+            continue;
+          }
+
+          let hitBubble = false;
+          bubbles.forEach((b, bIndex) => {
+            if (b.isGoldenBubble) return;
+            let dx = bullet.x - b.x;
+            let dy = bullet.y - b.y;
+            let distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < bullet.radius + b.radius) {
+              bubbles.splice(bIndex, 1);
+              playSound('bubbleBurst');
+              score += 10;
+              addFloatingText('+10', b.x, b.y, 'white');
+              addParticles(b.x, b.y, 'lightblue', 5);
+              if (!isPiercing) hitBubble = true;
+            }
+          });
+          
+          if (hitBubble && !isPiercing) bullets.splice(i, 1);
+        }
+      }
+    }
+
+    function drawBullets() {
+      bullets.forEach(bullet => {
+        ctx.beginPath();
+        ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'green';
+        ctx.fill();
+      });
+    }
+
+    function updateBlackBubbles() {
+      if (!survivalMode && !isHardMode) return;
+      if (survivalMode) {
+        survivalTimer++;
+        if (survivalTimer % 600 === 0) { // Every 10 seconds at 60fps
+          let spawnX, spawnY;
+          if (Math.random() < 0.5) {
+            spawnX = Math.random() < 0.5 ? -40 : canvas.width + 40;
+            spawnY = Math.random() * canvas.height;
+          } else {
+            spawnX = Math.random() * canvas.width;
+            spawnY = Math.random() < 0.5 ? -40 : canvas.height + 40;
+          }
+          blackBubbles.push({x: spawnX, y: spawnY, radius: 25, speed: 0.3 + (survivalTimer/8000)});
+        }
+      }
+
+      blackBubbles.forEach(bb => {
+        let dx = character.x - bb.x;
+        let dy = character.y - bb.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 0) {
+          bb.x += (dx/dist) * bb.speed;
+          bb.y += (dy/dist) * bb.speed;
+        }
+      });
+    }
+
+    function drawBlackBubbles() {
+      blackBubbles.forEach(bb => {
+        ctx.beginPath();
+        ctx.arc(bb.x, bb.y, bb.radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+        ctx.fill();
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      });
+    }
+
+    function adjustDifficulty() {
+      bubbleSpawnRate = Math.max(40, 100 - Math.floor(score / 150));
+    }
+
+    function gameOver() {
+      if (!gameOverState) {
+        gameOverState = true;
+        stopAmbientBGM();
+        if (autoShootInterval) clearInterval(autoShootInterval);
+      }
+    }
+
+    function drawCharacter() {
+      ctx.drawImage(characterImg, character.x - character.radius, character.y - character.radius, character.radius * 2, character.radius * 2);
+      if (shopEffects.shield) {
+        ctx.beginPath();
+        ctx.arc(character.x, character.y, character.radius + 8, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)'; // Cyan color
+        ctx.lineWidth = 4;
+        ctx.stroke();
+      }
+    }
+
+    function drawBubbles() {
+      bubbles.forEach(b => {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+        ctx.fillStyle = b.isGoldenBubble ? 'gold' : 'lightblue';
+        ctx.fill();
+      });
+    }
+
+    function drawWarning() {
+      if (bossWarningTimer > 0) {
+        if (Math.floor(bossWarningTimer / 15) % 2 === 0) {
+          ctx.fillStyle = 'red';
+          ctx.font = 'bold 40px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('Warning! Warning!', canvas.width / 2, canvas.height / 2);
+          ctx.textAlign = 'left';
+        }
+      }
+      if (survivalMessageTimer > 0) {
+        if (Math.floor(survivalMessageTimer / 15) % 2 === 0) {
+          ctx.fillStyle = 'red';
+          ctx.font = 'bold 30px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('サバイバルモード突入！', canvas.width / 2, canvas.height / 2 - 30);
+          ctx.font = '20px Arial';
+          ctx.fillStyle = 'white';
+          ctx.fillText('無敵の黒い泡から逃げ延びろ！', canvas.width / 2, canvas.height / 2 + 10);
+          ctx.textAlign = 'left';
+        }
+        survivalMessageTimer--;
+      }
+    }
+
+    function drawScore() {
+      ctx.font = '20px Arial';
+      ctx.fillStyle = (cheatGoldenScore || cheatMachineGun || cheatMaxWeapons || cheatInvincible) ? 'red' : 'black';
+      ctx.fillText(`スコア: ${score}`, 10, 30);
+    }
+
+    function drawGameState() {
+      if (gameState === 'start') {
+        ctx.font = '30px Arial';
+        ctx.fillStyle = 'black';
+        ctx.fillText('泡よけゲーム！', canvas.width / 2 - 100, canvas.height / 2 - 120);
+
+        // Normal Start
+        ctx.fillStyle = 'green';
+        ctx.fillRect(canvas.width / 2 - 80, canvas.height / 2 - 50, 160, 45);
+        ctx.fillStyle = 'white';
+        ctx.font = '18px Arial';
+        ctx.fillText('ノーマルスタート', canvas.width / 2 - 70, canvas.height / 2 - 22);
+
+        // Hard Start
+        ctx.fillStyle = '#ff4444';
+        ctx.fillRect(canvas.width / 2 - 80, canvas.height / 2 + 10, 160, 45);
+        ctx.fillStyle = 'white';
+        ctx.fillText('ハードスタート', canvas.width / 2 - 63, canvas.height / 2 + 38);
+
+        // How to Play
+        ctx.fillStyle = 'blue';
+        ctx.fillRect(canvas.width / 2 - 80, canvas.height / 2 + 70, 160, 45);
+        ctx.fillStyle = 'white';
+        ctx.fillText('遊び方', canvas.width / 2 - 27, canvas.height / 2 + 98);
+      } else if (gameState === 'howToPlay') {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = 'white';
+        ctx.font = '24px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('遊び方', canvas.width / 2, 80);
+        
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText('1. スワイプでキャラを操作、青い泡を避けろ！', 30, 140);
+        ctx.fillText('2. 金の泡を取るとスコアUP＆弾で反撃！', 30, 180);
+        ctx.fillText('3. 敵の青い泡も弾で破壊すると+10点！', 30, 220);
+        ctx.fillText('4. スコアでボス出現。弾幕を避けろ！', 30, 260);
+        ctx.fillText('5. ボス撃破でさらなる超強化(ショップ)解放！', 30, 300);
+
+        ctx.fillStyle = 'red';
+        ctx.fillRect(canvas.width / 2 - 50, canvas.height / 2 + 100, 100, 50);
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'center';
+        ctx.font = '20px Arial';
+        ctx.fillText('閉じる', canvas.width / 2, canvas.height / 2 + 130);
+        ctx.textAlign = 'left';
+
+        // Secret Cheat Button
+        ctx.beginPath();
+        ctx.arc(canvas.width - 30, 30, 15, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 105, 180, 0.7)';
+        ctx.fill();
+        
+      } else if (gameState === 'cheatMenu') {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'white';
+        ctx.font = '24px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('開発者チートモード', canvas.width / 2, 50);
+
+        let btnX = canvas.width / 2 - 120;
+        let btnW = 240;
+        let btnH = 40;
+        let startY = 80;
+        let gap = 50;
+        let labels = [
+          '金泡スコア2000: ' + (cheatGoldenScore ? 'ON' : 'OFF'),
+          '弾の最速発射: ' + (cheatMachineGun ? 'ON' : 'OFF'),
+          '最強武器フル装備: ' + (cheatMaxWeapons ? 'ON' : 'OFF'),
+          '無敵モード: ' + (cheatInvincible ? 'ON' : 'OFF'),
+          'ハードモード: ' + (cheatHardMode ? 'ON' : 'OFF'),
+          '紫ボス手前までスキップ',
+          '赤/裏ボス手前スキップ',
+          '戻る'
+        ];
+
+        for(let i=0; i<8; i++) {
+          ctx.fillStyle = i === 7 ? 'red' : '#4CAF50';
+          ctx.fillRect(btnX, startY + i * gap, btnW, btnH);
+          ctx.fillStyle = 'white';
+          ctx.font = '16px Arial';
+          ctx.fillText(labels[i], canvas.width / 2, startY + i * gap + 25);
+        }
+        ctx.textAlign = 'left';
+      } else if (gameState === 'countdown') {
+        ctx.font = '50px Arial';
+        ctx.fillStyle = 'black';
+        ctx.fillText(countdown, canvas.width / 2 - 20, canvas.height / 2);
+      } else if (gameOverState) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 40px Arial';
+        ctx.fillText('ゲームオーバー', canvas.width / 2, canvas.height / 2 - 60);
+        
+        ctx.fillStyle = (cheatGoldenScore || cheatMachineGun || cheatMaxWeapons || cheatInvincible) ? 'red' : 'gold';
+        ctx.font = 'bold 30px Arial';
+        const modeText = isHardMode ? "ハード" : "ノーマル";
+        ctx.fillText(`最終スコア(${modeText}): ${score}`, canvas.width / 2, canvas.height / 2 - 10);
+        
+        // Share Button
+        ctx.fillStyle = '#06C755'; // LINE Green
+        ctx.fillRect(canvas.width / 2 - 100, canvas.height / 2 + 30, 200, 50);
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 20px Arial';
+        ctx.fillText('LINEでシェア', canvas.width / 2, canvas.height / 2 + 62);
+        
+        // Restart Button
+        ctx.fillStyle = '#2196F3';
+        ctx.fillRect(canvas.width / 2 - 100, canvas.height / 2 + 90, 200, 50);
+        ctx.fillStyle = 'white';
+        ctx.fillText('もう一度遊ぶ', canvas.width / 2, canvas.height / 2 + 122);
+        
+        ctx.textAlign = 'left'; // Reset
+      }
+
+      // シールド消費メッセージの表示
+      if (shieldMessageTimer > 0) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(canvas.width / 2 - 100, canvas.height / 2 - 30, 200, 60);
+        ctx.fillStyle = 'white';
+        ctx.font = '20px Arial';
+        ctx.fillText('シールドが消費されました', canvas.width / 2 - 90, canvas.height / 2 + 5);
+        shieldMessageTimer--;
+      }
+    }
+
+    function drawShop() {
+      if (isShopOpen) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'white';
+        ctx.font = '30px Arial';
+        ctx.fillText('ショップ', canvas.width / 2 - 50, canvas.height / 2 - 100);
+        ctx.font = '20px Arial';
+        ctx.fillText(shopOptions[0], canvas.width / 2 - 150, canvas.height / 2 - 50);
+        ctx.fillText(shopOptions[1], canvas.width / 2 - 150, canvas.height / 2 - 20);
+        ctx.fillStyle = 'green';
+        ctx.fillRect(canvas.width / 2 - 100, canvas.height / 2 + 20, 80, 40);
+        ctx.fillRect(canvas.width / 2 + 20, canvas.height / 2 + 20, 80, 40);
+        ctx.fillStyle = 'white';
+        ctx.fillText('選択1', canvas.width / 2 - 90, canvas.height / 2 + 45);
+        ctx.fillText('選択2', canvas.width / 2 + 30, canvas.height / 2 + 45);
+      }
+    }
+
+    function openShop() {
+      if (shopCount === 1) {
+        shopOptions = ['泡を小さくする（金の泡は除外）', '金の泡だけを大きくする'];
+      } else if (shopCount === 2) {
+        shopOptions = ['1秒ごとに玉発射', '金の泡のスコアを200増やす'];
+      } else if (shopCount === 3) {
+        shopOptions = ['泡の速度を遅くする', '弾の速度を速くする'];
+      } else if (shopCount === 4) {
+        shopOptions = ['キャラの移動速度アップ', '青い泡の出現率を下げる'];
+      } else if (shopCount === 5) {
+        shopOptions = ['金の泡の出現率アップ', 'スコアを毎秒20増やす'];
+      } else if (shopCount === 6) {
+        shopOptions = ['弾の連射速度を上げる', 'キャラの当たり判定を小さくする'];
+      } else if (shopCount === 7) {
+        shopOptions = ['青い泡の出現率をさらに下げる', '金の泡のスコアをさらに200増やす'];
+      } else if (shopCount === 8) {
+        shopOptions = ['弾の貫通力を付与', 'キャラにシールドを付与'];
+      } else if (shopCount === 9) {
+        shopOptions = ['泡の動きを予測しやすくする', 'キャラの移動速度をさらに上げる'];
+      } else if (shopCount === 10) {
+        shopOptions = ['スコアを毎秒30増やす', '金の泡の出現率をさらに上げる'];
+      } else if (shopCount === 11) {
+        shopOptions = ['散弾（3方向射撃）', '弾のサイズを巨大化'];
+      } else if (shopCount === 12) {
+        shopOptions = ['シールド自動回復(30秒毎)', 'ホーミング弾（弾が敵を追尾）'];
+      } else if (shopCount === 13) {
+        shopOptions = ['金泡マグネット（金泡が近づく）', '弾の連射速度を極限まで上げる'];
+      } else if (shopCount === 14) {
+        shopOptions = ['対ボス特効（ボスへのダメージ2倍）', '金の泡の出現率を超アップ'];
+      } else if (shopCount === 15) {
+        shopOptions = ['神速（移動速度超アップ）', '極小判定（当たり判定さらに極小）'];
+      } else if (shopCount === 16) {
+        shopOptions = ['超貫通（貫通力アップ）', 'シールド破壊時に全方位反撃'];
+      } else if (shopCount === 17) {
+        shopOptions = ['弾の速度を超アップ', '敵の泡の速度をさらに遅くする'];
+      } else if (shopCount === 18) {
+        shopOptions = ['弾のサイズをさらに巨大化', 'シールド自動回復(15秒毎)'];
+      } else if (shopCount === 19) {
+        shopOptions = ['5方向射撃', '対ボス特効Lv2（ボスダメージ4倍）'];
+      } else if (shopCount === 20) {
+        shopOptions = ['全方位射撃(8方向)', '金泡マグネット強化（範囲拡大）'];
+      }
+    }
+
+    function applyShopEffect(option) {
+      if (shopCount === 1) {
+        if (option === 1) {
+          shopEffects.smallerBubbles = true;
+          bubbles.forEach(b => { if (!b.isGoldenBubble) b.radius = Math.max(5, b.radius - 5); });
+        } else if (option === 2) {
+          shopEffects.largerGoldenBubbles = true;
+          bubbles.forEach(b => { if (b.isGoldenBubble) b.radius += 5; });
+        }
+      } else if (shopCount === 2) {
+        if (option === 1) {
+          if (!autoShootInterval) autoShootInterval = setInterval(shootBullet, 1000);
+        } else if (option === 2) goldenBubbleScoreBonus += 200;
+      } else if (shopCount === 3) {
+        if (option === 1) {
+          shopEffects.slowerBubbles = true;
+          bubbles.forEach(b => { b.speedY = Math.max(0.1, b.speedY * 0.8); });
+        } else if (option === 2) shopEffects.bulletSpeedUp = true;
+      } else if (shopCount === 4) {
+        if (option === 1) shopEffects.speedUp = true;
+        else if (option === 2) bubbleSpawnRate = Math.min(150, bubbleSpawnRate + 20);
+      } else if (shopCount === 5) {
+        if (option === 1) shopEffects.goldenBubbleChanceUp = true;
+        else if (option === 2) { shopEffects.scorePerSecond = true; startScoreTimer(); }
+      } else if (shopCount === 6) {
+        if (option === 1) {
+          shopEffects.fasterShooting = true;
+          if (autoShootInterval) {
+            clearInterval(autoShootInterval);
+            autoShootInterval = setInterval(shootBullet, 500);
+          }
+        } else if (option === 2) {
+          shopEffects.smallerHitbox = true;
+          character.radius = Math.max(10, character.radius - 5);
+        }
+      } else if (shopCount === 7) {
+        if (option === 1) bubbleSpawnRate = Math.min(150, bubbleSpawnRate + 20);
+        else if (option === 2) goldenBubbleScoreBonus += 200;
+      } else if (shopCount === 8) {
+        if (option === 1) shopEffects.piercingBullets = true;
+        else if (option === 2) shopEffects.shield = true;
+      } else if (shopCount === 9) {
+        if (option === 1) shopEffects.straightBubbles = true;
+        else if (option === 2) shopEffects.extraSpeedUp = true;
+      } else if (shopCount === 10) {
+        if (option === 1) { shopEffects.extraScorePerSecond = true; startScoreTimer(); }
+        else if (option === 2) shopEffects.extraGoldenBubbleChanceUp = true;
+      } else if (shopCount === 11) {
+        if (option === 1) shopEffects.multiShot = 3;
+        else if (option === 2) shopEffects.giantBullets = 1;
+      } else if (shopCount === 12) {
+        if (option === 1) shopEffects.autoShieldTimer = setInterval(() => { if (!shopEffects.shield) shopEffects.shield = true; }, 30000);
+        else if (option === 2) shopEffects.homingBullets = true;
+      } else if (shopCount === 13) {
+        if (option === 1) shopEffects.goldenMagnet = 1;
+        else if (option === 2) { if(autoShootInterval){ clearInterval(autoShootInterval); autoShootInterval = setInterval(shootBullet, 250); } }
+      } else if (shopCount === 14) {
+        if (option === 1) shopEffects.bossDamage = 2;
+        else if (option === 2) shopEffects.goldenBubbleChanceUp = true;
+      } else if (shopCount === 15) {
+        if (option === 1) shopEffects.speedUp = true;
+        else if (option === 2) character.radius = Math.max(5, character.radius - 5);
+      } else if (shopCount === 16) {
+        if (option === 1) shopEffects.piercingBullets = true;
+        else if (option === 2) shopEffects.shieldRetaliation = true;
+      } else if (shopCount === 17) {
+        if (option === 1) shopEffects.bulletSpeedUp = true;
+        else if (option === 2) shopEffects.slowerBubbles = true;
+      } else if (shopCount === 18) {
+        if (option === 1) shopEffects.giantBullets = 2;
+        else if (option === 2) { if (shopEffects.autoShieldTimer) clearInterval(shopEffects.autoShieldTimer); shopEffects.autoShieldTimer = setInterval(() => { if (!shopEffects.shield) shopEffects.shield = true; }, 15000); }
+      } else if (shopCount === 19) {
+        if (option === 1) shopEffects.fiveWay = true;
+        else if (option === 2) shopEffects.bossDamage = 4;
+      } else if (shopCount === 20) {
+        if (option === 1) shopEffects.eightWay = true;
+        else if (option === 2) shopEffects.goldenMagnet = 2;
+      }
+    }
+
+    function gameLoop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      frameCount++;
+
+      if (gameState === 'playing' && !gameOverState) {
+        let requiredShopScore = boss1Defeated ? lastShopScore + 4000 : lastShopScore + 2000;
+        if (score >= requiredShopScore && !isShopOpen && !bossActive && pendingBoss === 0) {
+          if ((shopCount < 10 && !boss1Defeated) || (shopCount >= 10 && shopCount < 20 && boss1Defeated)) {
+            isShopOpen = true;
+            shopCount++;
+            lastShopScore = score;
+            openShop();
+          }
+        }
+
+        if (!isShopOpen) {
+          if (!bossActive && pendingBoss === 0 && frameCount % bubbleSpawnRate === 0) spawnBubble();
+          moveCharacter();
+          updateBoss();
+          updateBossBullets();
+          updateBubbles();
+          updateBlackBubbles();
+          updateBullets();
+          checkCollisions();
+          updateVisualEffects();
+          adjustDifficulty();
+        }
+      }
+
+      if (gameState === 'playing' || gameOverState) {
+        drawCharacter();
+        drawBoss();
+        drawBossBullets();
+        drawBubbles();
+        drawBlackBubbles();
+        drawBullets();
+        drawVisualEffects();
+        drawScore();
+        drawWarning();
+      }
+
+      drawGameState();
+      drawShop();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    characterImg.onload = () => {
+      console.log("画像の読み込みが完了しました");
+      gameLoop();
+    };
+    characterImg.onerror = () => {
+      console.error("画像の読み込みに失敗しました: profile.jpg");
+      gameLoop();
+    };
+    gameLoop();
+  </script>
+</body>
+</html>
